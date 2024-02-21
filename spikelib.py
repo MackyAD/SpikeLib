@@ -67,7 +67,7 @@ class RunInfo:
             self._attr_translation_keys[attr_name] = name
             
             setattr(self, attr_name, value)
-            
+    
     _properties_titles = {
         'channel_count' : 'channel count',
         'channel' : 'channel',
@@ -81,6 +81,12 @@ class RunInfo:
         'sampling_rate' : 'sampling rate (Hz)',
         'file' : 'file'
         }
+    
+    @property
+    def contents(self):
+        """ Returns the names of all the user-facing attributes of the class"""
+        return *self._attr_translation_keys, *self._properties_titles
+        
     def __repr__(self):
                 
         ## Compile the list of things to display
@@ -234,7 +240,7 @@ class Processors:
         return prefilt-posfilt
  
         
-    def downsample(self, downsampling_rate=10):
+    def downsample(self, downsampling_rate=10, inplace=True):
         """
         Downsamples the data by skipping datapoints. 
 
@@ -253,25 +259,38 @@ class Processors:
         # downsample
         downsampled = data[::downsampling_rate].copy()
         
-        # overwrite old dataframe
-        empty = np.empty_like(data.times.values)
-        for col_name in downsampled.columns:
-            col = downsampled[col_name]
-            empty[:col.size] = col
+        if inplace:
+            # overwrite old dataframe
+            empty = np.empty_like(data.times.values)
+            for col_name in downsampled.columns:
+                col = downsampled[col_name]
+                empty[:col.size] = col
+                
+                data[col_name] = empty
             
-            data[col_name] = empty
+            # cut now extra values
+            data.drop(index=list(range(col.size, len(data))), inplace=True)
+            
+            # record what we did and update sampling rate
+            self._add_process_entry(action_name, downsampling_rate=downsampling_rate, inplace=inplace)
+            data.metadata.sampling_rate = data.metadata.sampling_rate / downsampling_rate
         
-        # cut now extra values
-        data.drop(index=list(range(col.size, len(data))), inplace=True)
-        
-        # record what we did and update sampling rate
-        self._add_process_entry(action_name, downsampling_rate=downsampling_rate)
-        data.metadata.sampling_rate = data.metadata.sampling_rate / downsampling_rate
+        else:
+            # copy metadata and attributes
+            for attr in self._all_info_attributes:
+                setattr(downsampled.process, attr, getattr(self, attr))
+            downsampled.metadata = data.metadata
+            
+            # record what we did and update the sampling rate
+            downsampled.process._add_process_entry(action_name, downsampling_rate=downsampling_rate, inplace=inplace)
+            downsampled.metadata.duration = data.times.values.ptp()
+            
+            return downsampled
                 
     def cut(self, start, end, units='index', inplace=True):
         """ Cut the data in the given interval [start, end]. Units can be 
         either 'index' or 'time'. In the former case, start and end are assumed
-        to be the indexes at which the cut happens. In the latter, they are 
+        to be the int indexes at which the cut happens. In the latter, they are 
         assumed to be the times, and the appropiate indexes are found. """
         
         assert units in ('index', 'time')
@@ -329,7 +348,7 @@ class Processors:
         degree : int, optional
             Degree of the polynomial used to fit the data. Default is 5.
         keep_og : Bool, optional
-            Whether to keep the original column or overwride it. The default is
+            Whether to keep the original column or overwrite it. The default is
             False.
         column : str, optional
             A string describing what column to apply the funciton on. The 
@@ -371,7 +390,7 @@ class Processors:
         Parameters
         ----------
         keep_og : Bool, optional
-            Whether to keep the original column or overwride it. The default is
+            Whether to keep the original column or overwrite it. The default is
             False.
         column : str, optional
             The column to apply the detrend to. You need to have calculated 
@@ -419,7 +438,7 @@ class Processors:
             them at the expense of increased cost. See no_border_effects_call.
             The default is True, keeping border effects.
         keep_og : Bool, optional
-            Whether to keep the original column or overwride it. The default is
+            Whether to keep the original column or overwrite it. The default is
             False.
         column : str, optional
             A string describing what column to apply the funciton on. The 
@@ -470,7 +489,7 @@ class Processors:
             them at the expense of increased cost. See no_border_effects_call.
             The default is True, keeping border effects.
         keep_og : Bool, optional
-            Whether to keep the original column or overwride it. The default is
+            Whether to keep the original column or overwrite it. The default is
             False.
         column : str, optional
             A string describing what column to apply the funciton on. The 
@@ -520,7 +539,7 @@ class Processors:
             them at the expense of increased cost. See no_border_effects_call.
             The default is False, removing border effects.
         keep_og : Bool, optional
-            Whether to keep the original column or overwride it. The default is
+            Whether to keep the original column or overwrite it. The default is
             False.
         column : str, optional
             A string describing what column to apply the funciton on. The 
@@ -632,9 +651,8 @@ class Processors:
 
         Returns
         -------
-        (float, float)
-            Value of the baseline for each channel. The value is repeated (but)
-            not calculated twice) if the data is single channel.
+        float
+            Value of the baseline.
         """
         
         col = self._get_column(column)        
@@ -669,8 +687,8 @@ class Processors:
         -------
         times : array
             times at which the baselines where calculated.
-        baselines1 : array
-            baselines of channel 1.
+        baselines : array
+            baselines.
         
         """
         
@@ -748,6 +766,8 @@ class Processors:
 
         Parameters
         ----------
+        prominence, distance : float
+            See my_find_peaks for more info.        
         column : str, optional
             A string describing what column to apply the funciton on. The 
             default is ''.
@@ -775,15 +795,17 @@ class Processors:
         to be fairly clean (a gaussian fitler with sigma=100ms seems to be good
         enough). To do so it does three findpeaks passes:
             1. Find (all) peaks that are above 0mv (assumes a detrended signal)
-            2. Find peaks that fall above a given threshold. The threshold is 
-            calculated from the data of the previous pass using an otsu 
-            thresholding method to discriminate high peaks and spurious peaks.
-            The otsu threshold will only be used if it falls between two maxima
-            of the distribution of peaks, since it tends to give useless values
-            when the distribution has only one maximum.
+            # 2. Find peaks that fall above a given threshold. The threshold is 
+            # calculated from the data of the previous pass using an otsu 
+            # thresholding method to discriminate high peaks and spurious peaks.
+            # The otsu threshold will only be used if it falls between two maxima
+            # of the distribution of peaks, since it tends to give useless values
+            # when the distribution has only one maximum.
             3. Find peaks that lie at least some distance away from the previous
             peak. The distance is calculated as period_percent% of the mode of 
             the period duration, as given by the previous pass.
+
+        NOTE: step 2 is currently disabled.
 
         Parameters
         ----------
@@ -791,6 +813,17 @@ class Processors:
             time vector.
         ch : aray
             data vector.
+        prominence : float, optional
+            Minimum prominence of the peaks in the third pass. Use None to 
+            disable prominence check. See scipy.signal.find_peaks for more 
+            information on prominence. Default is 5.
+        distance : float, optional
+            Required minimum distance between peaks in the third step as a 
+            fraction of the average distance between peaks found in the first 
+            two steps. It's used to avoid finding peaks that are too close 
+            together. Use None to disable distance check. See s
+            cipy.signal.find_peaks for more information on distance. Default is
+            0.6. 
 
         Returns
         -------
@@ -813,8 +846,9 @@ class Processors:
         counts, bins = np.histogram(np.diff(t_peaks))
         bin_centers = bins[:-1] + np.diff(bins) / 2
         period_mode = bin_centers[ np.argmax(counts) ]
-        distance_points = int(period_mode * period_percent / (times[1] - times[0]))
+        distance_points = int(period_mode * period_percent / (times[1] - times[0])) if period_percent is not None else None
         # p_inx, _ = signal.find_peaks(ch, height=threshold, distance=distance_points)
+        
         p_inx, _ = signal.find_peaks(ch, distance=distance_points, prominence=prominence)
                 
         return p_inx
@@ -920,7 +954,7 @@ class Processors:
         return trend_poly(self._df.times) 
     
     @event_finding
-    def get_crossings(self, edge, threshold=5, peak_min_distance=0.5, column=None):
+    def get_crossings(self, edge, threshold=5, peak_min_distance=0.5, none_handling='warn', column=None):
         """
         Calculate the point at which the signal crosses the threshold at each
         rising edge or each falling edge, depending on the value of 'edge'. You
@@ -946,6 +980,9 @@ class Processors:
             The minimum distance between peaks, in units of average distance
             between peaks. After one peak is used, any subsequent peaks closer
             than this value will be ignored. The default is 0.5.
+        none_handling : str, optional
+            One of 'error', 'warn', 'ignore'. Decides how to handle when no 
+            peaks were found. Default is 'warn'.
         column : str or None, optional
             A string describing what column to apply the funciton on. If None 
             the function defaults to the column find_peaks was performed on. 
@@ -960,6 +997,7 @@ class Processors:
         
         assert edge in ('rising', 'falling'), 'edge must be one of "rising" or "falling"'
         assert 'findpeaks' in self.steps, 'You must find peaks first'
+        assert none_handling in ('error', 'warn', 'ignore')
         
         # check if findpeaks was done on the requested channel (for example, gauss_filt)
         # if not, warn and continue
@@ -974,7 +1012,8 @@ class Processors:
         
         # retrieve peak data
         peaks = self.peaks
-        mean_period_in_points = round(np.mean(np.diff(peaks)))
+        default_mean_period = -np.inf if edge == 'rising' else np.inf
+        mean_period_in_points = round(np.mean(np.diff(peaks))) if peaks.size > 1 else default_mean_period
         
         crossings = []
         prev_peak = -np.inf # to prime the first peak
@@ -1009,7 +1048,14 @@ class Processors:
             prev_peak = peak
         
         if not crossings: # no peaks were found over the threshold
-            raise ValueError(f"It's likely no peaks were found over the given threshold value of {threshold}. Or maybe something else is wrong. Are you sure you have peaks?")
+            msg = f"It's likely no peaks were found over the given threshold value of {threshold}. Or maybe something else is wrong. Are you sure you have peaks in '{self._df.metadata.file.stem}'?"
+            
+            if none_handling == 'warn':
+                cprint(f'&ly {msg}')
+            elif none_handling == 'error':
+                raise ValueError(msg)
+            elif none_handling == 'ignore':
+                pass
 
         crossings = np.asarray(crossings)
         return crossings
@@ -1326,13 +1372,26 @@ class Processors:
             
         # define behaviour regarding column overwritting
         if keep_og:
-            new_name = og_column_name + '_' + action
+            new_name = self._ensure_name_is_new(og_column_name + '_' + action, self._df.columns)
+            
         else:
             new_name = og_column_name
                 
         # write columns
         self._df[new_name] = processed
-             
+    
+    @staticmethod
+    def _ensure_name_is_new(name, existing):
+        """ Checks if the suggested name is new. If not, it appends a number at
+        the end such that the returned name is unique."""
+        new_name = name
+        i = 1
+    
+        while new_name in existing:
+            i+=1
+            new_name = name+str(i)
+        
+        return new_name
     
     def _add_process_entry(self, action, **kwargs):
         """
@@ -1374,6 +1433,7 @@ class Processors:
         if not isinstance(column, str):
             raise TypeError('column must be a string')
         
+        # get a list of the colums that hold data, minus the leading 'rec_'
         column_options = set(re.sub(r'rec_?', '', x) for x in self._df.columns if x not in self._non_data_columns)
         column = column.strip('_') # strip leading '_' in case there were any
         if column not in column_options:
@@ -1493,7 +1553,7 @@ class Processors:
         Parameters
         ----------
         processing_steps : str, iterable or None, optional
-            Define what processing step(s) to plot. If None, jus tplot the raw 
+            Define what processing step(s) to plot. If None, just plot the raw 
             data. If 'all', plot raw and all processing steps. If an iterable, 
             it should contain the list of the steps as defined in steps. Use 
             'raw' to plot the raw data. The default is None.
@@ -1516,9 +1576,9 @@ class Processors:
         # process input
         if processing_steps is None:
             processing_steps = ['raw']
-        if processing_steps == 'all':
+        elif processing_steps == 'all':
             processing_steps = [c for c in self._df.columns if c not in self._non_data_columns]
-        if isinstance(processing_steps, str):
+        elif isinstance(processing_steps, str):
             processing_steps = [processing_steps]
         
         # plot processing steps
@@ -1559,27 +1619,27 @@ class Processors:
 
 def load_data(file, sweep=None, channel=0):
     """
-    NOTE: This function is a kind of wrapper to load single channel files using
-    the two channel processors. It copies the only channel onto both channels 
-    of the object, so the processors will be highly inefficient until they are
-    rewritten.
-    
-    Loads the ABF file, extracts the data from channel 1 in the sweep 0 (only 
-    sweep in these files) and the times array. The times array will always 
-    start at t=0. Pack everything into a pandas.DataFrame.
-    The dataFrame used has two custom accessors that store metadata for the run
-    and a bunch of processing functions. data.processing.info will store the
-    processing steps done to the data.
+    Load data from an abf file. Builds the data into a dataframe with columns
+    'time', 'rec' and 'pert' containng the time vector, the actual recording
+    and the perturbation (usually imput current), respectively. The dataframe
+    is overloaded with two accessors, one for processing and one for recording 
+    metadata. The latter gets automatically populated with data from the 
+    recording file and can be further enriched with an 'info.csv' file, where a
+    column labeled 'recoding' contains the recording name and the following 
+    columns contain the relevant metadata.
 
     Parameters
     ----------
     file : str or Path-like
-        Path to the data.
-    interval : 'str'
-        A string indicating what part of the recording to use. It should be 
-        either "todo", or two numbers separated by a dash. For example '1-4.5'
-        indicates that the data should only be used between minute 1 and minute
-        4.5. Setting it to None will use the whole dataseries. Default is None.
+        Path to the file to be loaded.
+    sweep : int or None, optional
+        What sweep to load. No check is done to assure the requested sweep 
+        exists, so pyabf will error out if it does not. If sweep is None, all
+        sweeps will be loaded and concatenated. The default is None.
+    channel : TYPE, optional
+        What channel to load. No check is done to assure the requested channel
+        exists, so pyabf will error out if it does not. The default is 0.
+
     Returns
     -------
     data : pandas.DataFrame
@@ -1648,7 +1708,8 @@ def extract_data(abf, sweep, channel):
     return times, rec, pert
 
 def extract_target_interval(info, abf):
-    """ Extract the interval of the data to use, if we need to cut it."""
+    """ Extract the interval of the data to use, if we need to cut it. The 
+    interval should be specified inthe column 'range_min'."""
     
     # extract interval
     if info is not None and 'range_min' in info:
@@ -1657,7 +1718,7 @@ def extract_target_interval(info, abf):
         interval = None
     
     # Cut data at required points
-    if interval is not None and not np.isnan(interval):
+    if interval is not None and isinstance(interval, str):
         start_min, end_min = map(float, interval.split('-'))
         start = int(start_min * 60 * abf.sampleRate)
         end = int(end_min * 60 * abf.sampleRate)
