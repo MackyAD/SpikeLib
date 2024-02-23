@@ -157,6 +157,7 @@ def register_categories(cls):
 filtering = category('filtering')
 detrending = category('detrending')
 event_finding = category('event_finding')
+characteristics = category('characteristics')
 
 ##############
 ### Define analysis and processing functions
@@ -206,6 +207,7 @@ class Processors:
             self._info = (value, )
         else:
             self._info = (*self._info, value)
+            
     @property
     def steps(self):
         """Names of the processing steps taken."""
@@ -220,11 +222,14 @@ class Processors:
         if self.polytrend is not None:
             print('A detrending job was already done. Overriding the previous one.')
         self._polytrend = trend
+    
+    @characteristics 
     def get_polytrend(self):
         """ Evaluates the polynomial trend."""
         assert 'pdetrend' in self.steps, 'You must run a detrending job first'
         return self.polytrend(self._df.times)
-        
+    
+    @characteristics 
     def get_hptrend(self):
         assert 'hpfilt' in self.steps, 'You must run a detrending job first'
         
@@ -461,7 +466,7 @@ class Processors:
         sigma_points = (sigma_ms / 1000) * sampling_rate
         
         # col_filt = gaussian_filter1d(col[~nan_locs], sigma_points)
-        col_filt = self.no_border_effect_call(
+        col_filt = self._no_border_effect_call(
             partial(gaussian_filter1d, sigma=sigma_points),
             col[~nan_locs],
             border_effects
@@ -510,7 +515,7 @@ class Processors:
                 
         sampling_rate = data.metadata.sampling_rate
         sos = signal.butter(filter_order, frequency_cutoff, btype='lowpass', output='sos', fs=sampling_rate)
-        col_filt = self.no_border_effect_call(
+        col_filt = self._no_border_effect_call(
             partial(signal.sosfiltfilt, sos),
             col[~nan_locs],
             border_effects
@@ -560,7 +565,7 @@ class Processors:
                 
         sampling_rate = data.metadata.sampling_rate
         sos = signal.butter(filter_order, frequency_cutoff, btype='highpass', output='sos', fs=sampling_rate)
-        col_filt = self.no_border_effect_call(
+        col_filt = self._no_border_effect_call(
             partial(signal.sosfiltfilt, sos),
             col[~nan_locs],
             border_effects
@@ -570,7 +575,7 @@ class Processors:
         self._add_process_entry(action_name, filter_order=filter_order, frequency_cutoff=frequency_cutoff, border_effects=border_effects, keep_og=keep_og, column=column)  
         
     @staticmethod
-    def no_border_effect_call(func, data, border_effects):
+    def _no_border_effect_call(func, data, border_effects):
         """ Call a function (usually a filter) over the data. Avoid border 
         effects if border_effects=False. To do so, before applying func, add a 
         mirrored copy of the data at the end and then a copy of the whole thing
@@ -595,6 +600,7 @@ class Processors:
     ### ATTRIBUTES CALCULATIONS ###
     ###############################
     
+    @characteristics 
     def magnitude_and_phase(self, column=''):
         """
         Calculates the phase and magnitude of the timeseries in channels using 
@@ -634,7 +640,7 @@ class Processors:
         self._save_processed_data(magnitudes, keep_og=True, column=column, action='magnitude')
         self._add_process_entry(action_name, column=column)  
         
-       
+    @characteristics   
     def calc_baseline(self, column='', drop_quantile=0.5):
         """
         Uses calc_baseline_in_one_bit to calculate the baseline of the data 
@@ -660,6 +666,7 @@ class Processors:
                     
         return minima.mean()
     
+    @characteristics 
     def calc_multi_baseline(self, column='', drop_quantile=0.5, bits=None, length=None):
         """
         Calculate the local baseline value for each channel. "local" is here 
@@ -714,7 +721,6 @@ class Processors:
         
         return times, baselines
 
-    
     @staticmethod
     def calc_baseline_in_one_bit(data, drop_quantile=0.5):
         """
@@ -890,7 +896,6 @@ class Processors:
         
     #     return threshold
     
-    
     @property
     def peaks(self):
         """ Peak indexes"""
@@ -921,6 +926,7 @@ class Processors:
         col = self._get_column(column)
         return col.values[self.peaks]
     
+    @characteristics 
     def get_avg_period(self):
         """ Calculate the average (mean) period from a find peaks operation."""
         return np.mean( np.diff(self.get_peak_pos()))
@@ -1643,7 +1649,7 @@ def load_data(file, sweep=None, channel=0):
     Returns
     -------
     data : pandas.DataFrame
-        The loaded data, optionally pre-processed with a gaussian filter.
+        The loaded data
 
     """
     # Load data
