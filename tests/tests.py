@@ -11,7 +11,9 @@ import numpy as np
 
 #%% Multiple sweeps
 
-file = '/home/marcos/Documents/Spikelib/test_data/agus/agus01.abf'
+# file = '/home/marcos/Documents/Spikelib/test_data/agus/agus01.abf'
+file = '/home/user/Documents/Doctorado/SpikeLib/test_data/agus/agus01.abf'
+
 data = load_data(file, sweep=1)
 data.process.downsample(100)
 

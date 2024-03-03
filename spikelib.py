@@ -15,7 +15,6 @@ from functools import partial
 import numpy as np
 from scipy import signal
 from scipy.ndimage import gaussian_filter1d
-from skimage import filters
 import pandas as pd
 import matplotlib.pyplot as plt
 
