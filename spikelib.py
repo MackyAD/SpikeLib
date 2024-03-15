@@ -1773,9 +1773,13 @@ def extract_info_line(file):
     
     # load the file:
     if ext == '.csv':
-        info = pd.read_csv(info_file).set_index('recording')
+        info = pd.read_csv(info_file)
     else:
-        info = pd.read_excel(info_file).set_index('recording')
+        info = pd.read_excel(info_file)
+    
+    # force recoding names to string type
+    info.recording = info.recording.astype(str)
+    info = info.set_index('recording')
     
     # extract info line
     try:
