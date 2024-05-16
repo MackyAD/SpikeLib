@@ -337,6 +337,62 @@ class Processors:
             cut.metadata.duration = data.times.values.ptp()
             
             return cut
+
+    def itersweeps(self, out: str='data'):
+        """
+        Make an iterator to iterate over the sweeps of the run. Either yield the
+        sliced run or a slice to manually use.
+
+        Parameters
+        ----------
+        out : str, optional
+            If 'data', yield sliced data. If 'slices', yield slices to use 
+            manually. Raise ValueError otherwise. The default is 'data'.
+
+        Yields
+        ------
+        Pandas.DataFrame or slice
+        
+        NOTE
+        ----
+        If out=='data', the sliced data bits are slices of a DataFrame that is
+        not instantiated with all the metadata of the original data. That can
+        still be manually accessed through the original's data metadata. To be
+        able to run processor methods on the sliced bits, the user should use
+        out='slices' and slice the data manually using Processors.cut by 
+        accessing slice.start and slice.stop.
+        
+        """
+    
+        # extract some parameters
+        data = self._df
+        dur = data.metadata.sweep_duration_sec
+        count = data.metadata.sweep_count
+        
+        # if only one weeps was loaded, use count=1
+        if data.metadata.sweep is not None:
+            count = 1
+            
+        # make a generator that yields slices
+        def slicer_gen():
+            for i in range(count):
+                start = find_point_by_value(data.times.values, i*dur)
+                end = find_point_by_value(data.times.values, (i+1)*dur)
+                 
+                yield slice(start, end)
+        
+        # instantiate the genrator
+        slicer = slicer_gen()
+
+        # return either sliced data or slicer itself
+        if out=='data':
+            for s in slicer:
+                yield data.iloc[s]
+        elif out=='slices':
+            yield from slicer
+        else:
+            raise ValueError('Out has to be either "data" or "slices"')
+            
     
     ##########################
     ### DETRENDING OPTIONS ###
