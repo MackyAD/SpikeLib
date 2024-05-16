@@ -804,7 +804,7 @@ class Processors:
             values of the local minima under the given quantile.
         """
         
-        min_inx, _ = signal.find_peaks(data)
+        min_inx, _ = signal.find_peaks(-data)
         minima = data[min_inx]
                 
         # find the requested quantile of the minima
