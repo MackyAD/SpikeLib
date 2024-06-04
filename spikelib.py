@@ -480,6 +480,47 @@ class Processors:
         self._save_processed_data(y_dtr, keep_og, column, action_name)
         self._add_process_entry(action_name, keep_og=keep_og, column=column)
 
+    @detrending
+    def substract_baseline_per_sweep(self, keep_og=False, column = ''):
+        """
+        Takes the data frame and calculate a baseline for each sweep with the first
+        500ms and subtracts it in each sweep.  
+           
+        Parameters
+        ----------
+        keep_og : Bool, optional
+            Whether to keep the original column or overwrite it. The default is
+            False.
+        column : str, optional
+            A string describing what column to apply the funciton on. The 
+            default is ''.
+           
+        Returns
+        -------
+        None.
+           
+        """
+        action_name = 'subbaseline'
+        data = self._df
+        
+        new_values= [] 
+         
+        # Loop over sweeps with itersweeps
+        for i, s in enumerate(data.process.itersweeps(out='slices')):
+            # cut the data for the sweep
+            bit = data.process.cut(s.start, s.stop, inplace=False)
+            # calculate the baseline for the first 500ms
+            btimes, bvals = bit.process.calc_multi_baseline(length=0.5)
+            baseline = bvals[0]
+            # Save the data in a list with the baseline substracted
+            new_values.append(bit.rec.values - baseline)
+        
+        new_values = np.concatenate(new_values)
+        self._save_processed_data(new_values, keep_og, column, action_name)
+        
+        # record what we did and update sampling rate
+        self._add_process_entry(action_name, keep_og=keep_og)
+
 
     ###############
     ### FILTERS ###
