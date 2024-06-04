@@ -377,7 +377,10 @@ class Processors:
         def slicer_gen():
             for i in range(count):
                 start = find_point_by_value(data.times.values, i*dur)
-                end = find_point_by_value(data.times.values, (i+1)*dur)
+                if i<(count-1):
+                    end = find_point_by_value(data.times.values, (i+1)*dur)
+                else:
+                    end = find_point_by_value(data.times.values, (i+1)*dur) + 1
                  
                 yield slice(start, end)
         
@@ -1649,8 +1652,10 @@ class Processors:
             ax.plot(data.times, data[step], label=step)
          
         # plot current injection
-        if not all(data.pert==0):
-            ax.plot(data.times, data.pert, 'k', label=metadata._labels[2])
+        for i, perturbation_col in enumerate(('pert', 'dig0', 'dig1')):
+            
+            if not all(data[perturbation_col]==0):
+                ax.plot(data.times, data[perturbation_col], 'k', label=metadata._labels[2+i])
         
         # format axes
         ax.set_xlabel(metadata._labels[0])
@@ -1712,11 +1717,12 @@ def load_data(file, sweep=None, channel=0):
     info = extract_info_line(file)
     
     # Extract recording
-    times, rec, pert = extract_data(abf, sweep, channel)
+    times, rec, pert, dig0, dig1 = extract_data(abf, sweep, channel)
     interval = extract_target_interval(info, abf)
      
     # Pack everything into a DataFrame
-    data = pd.DataFrame(data={'times':times, 'rec':rec, 'pert':pert})
+    data = pd.DataFrame(data={'times':times, 'rec':rec, 'pert':pert
+                             'dig0':dig0, 'dig1':dig1})
     data = data[interval].reset_index(drop=True)
     data.times -= data.times.values[0]
     
@@ -1747,12 +1753,17 @@ def extract_data(abf, sweep, channel):
         times = abf.sweepX
         rec = abf.sweepY
         pert = abf.sweepC
+        dig0 = abf.sweepD(0)
+        dig1 = abf.sweepD(1)
         
     # else, concatenate all sweeps
     else:
         times = []
         rec = []
         pert = []
+        dig0 = []
+        dig1 = []
+        
         for sweep in abf.sweepList:
             # Set sweep and channel, extract tmes and data
             # We could use getAllXs and getAllYz, but there's no equivalent for C
@@ -1765,8 +1776,10 @@ def extract_data(abf, sweep, channel):
         times = np.concatenate(times)
         rec = np.concatenate(rec)
         pert = np.concatenate(pert)
+        dig0 = np.concatenate(dig0)
+        dig1 = np.concatenate(dig1)
         
-    return times, rec, pert
+    return times, rec, pert, dig0, dig1
 
 def extract_target_interval(info, abf):
     """ Extract the interval of the data to use, if we need to cut it. The 
