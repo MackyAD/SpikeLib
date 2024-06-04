@@ -377,10 +377,9 @@ class Processors:
         def slicer_gen():
             for i in range(count):
                 start = find_point_by_value(data.times.values, i*dur)
-                if i<(count-1):
-                    end = find_point_by_value(data.times.values, (i+1)*dur)
-                else:
-                    end = find_point_by_value(data.times.values, (i+1)*dur) + 1
+                # handle last point
+                if i+1 == count:
+                    end +=1
                  
                 yield slice(start, end)
         
