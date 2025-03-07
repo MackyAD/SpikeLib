@@ -324,7 +324,7 @@ class Processors:
             
             # record what we did and update sampling rate
             self._add_process_entry(action_name, start=start, end=end, units=units, inplace=inplace)
-            data.metadata.duration = data.times.values.ptp()
+            data.metadata.duration = np.ptp(data.times.values)
             
         else:
             # copy metadata and attributes
@@ -334,7 +334,7 @@ class Processors:
             
             # record what we did and update the sampling rate
             cut.process._add_process_entry(action_name, start=start, end=end, units=units, inplace=inplace)
-            cut.metadata.duration = data.times.values.ptp()
+            cut.metadata.duration = np.ptp(data.times.values)
             
             return cut
 
